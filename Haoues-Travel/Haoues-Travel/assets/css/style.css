@@ -257,10 +257,11 @@ body::after {
   content: "";
   position: fixed;
   inset: 0;
+  /* Single, very soft top-anchored wash. Bottom radial removed to stop a
+     visible horizontal band appearing across the lower viewport / footer. */
   background:
-    radial-gradient(ellipse 60% 50% at 75% 30%, rgba(212,175,55,0.07) 0%, transparent 70%),
-    radial-gradient(ellipse 40% 60% at 20% 80%, rgba(0,194,184,0.045) 0%, transparent 60%),
-    radial-gradient(ellipse 30% 40% at 50% 100%, rgba(212,175,55,0.03) 0%, transparent 70%);
+    radial-gradient(ellipse 60% 45% at 75% 20%, rgba(212,175,55,0.04) 0%, transparent 75%),
+    radial-gradient(ellipse 40% 50% at 20% 25%, rgba(0,194,184,0.025) 0%, transparent 70%);
   pointer-events: none;
   z-index: 0;
 }
@@ -334,11 +335,12 @@ p, li, label { line-height: var(--leading-arabic); }
   height: 100vh;
   z-index: 1;
   pointer-events: none;
+  /* Toned down + anchored to the upper viewport so the bottom of every page
+     stays clean (no horizontal band of glow across footer / empty space). */
   background:
-    radial-gradient(600px 600px at 85% 15%, var(--gold-glow) 0%, transparent 60%),
-    radial-gradient(520px 520px at 10% 85%, var(--teal-glow) 0%, transparent 60%),
-    radial-gradient(380px 380px at 55% 40%, rgba(232,201,122,0.08) 0%, transparent 70%);
-  filter: blur(60px);
+    radial-gradient(600px 600px at 85% 12%, rgba(212,175,55,0.10) 0%, transparent 65%),
+    radial-gradient(440px 440px at 12% 22%, rgba(0,194,184,0.08) 0%, transparent 65%);
+  filter: blur(70px);
   animation: auroraDrift 30s linear infinite;
 }
 
@@ -474,20 +476,22 @@ p, li, label { line-height: var(--leading-arabic); }
 .circle-bg {
   position: absolute;
   border-radius: 50%;
-  filter: blur(90px);
+  filter: blur(110px);
   pointer-events: none;
   z-index: 1;
   animation: orbFloat 26s ease-in-out infinite;
 }
+/* Both ambient orbs are anchored to the hero region only so they never
+   produce a hard horizontal edge through the lower sections / footer. */
 .circle-bg-1 {
-  width: 560px; height: 560px;
-  top: -120px; right: -120px;
-  background: rgba(212, 175, 55, 0.12);
+  width: 460px; height: 460px;
+  top: -160px; right: -140px;
+  background: rgba(212, 175, 55, 0.07);
 }
 .circle-bg-2 {
-  width: 420px; height: 420px;
-  bottom: -80px; left: -100px;
-  background: rgba(0, 194, 184, 0.10);
+  width: 360px; height: 360px;
+  top: 8vh; left: -160px;
+  background: rgba(0, 194, 184, 0.06);
   animation-delay: -8s;
 }
 
@@ -873,7 +877,8 @@ select {
   background: linear-gradient(135deg, var(--gold-400), var(--gold-300));
   color: var(--bg-void);
   border-color: var(--gold-300);
-  box-shadow: 0 10px 24px var(--gold-glow);
+  /* No outer gold glow — keeps the pill crisp against the dark backdrop. */
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
 }
 
 /* Badges */
@@ -1219,8 +1224,23 @@ main { display: block; }
   letter-spacing: normal;
   text-shadow: 0 4px 40px rgba(212,175,55,0.25);
   margin: 0;
-  /* Leave a little breathing room so descenders/diacritics aren't clipped. */
-  padding-block: 0.1em;
+  /* Dark glass backplate so the title sits cleanly over the ambient
+     gold/teal aurora instead of being washed out. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.25em;
+  padding: clamp(14px, 2.4vw, 26px) clamp(22px, 4vw, 44px);
+  border-radius: var(--radius-xl);
+  background:
+    linear-gradient(180deg, rgba(8,16,30,0.78), rgba(4,10,22,0.86));
+  border: 1px solid rgba(212,175,55,0.22);
+  box-shadow:
+    0 18px 50px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 .hero-title-deco {
   display: inline-block;
@@ -1413,7 +1433,8 @@ main { display: block; }
 .card:hover {
   transform: translateY(-8px);
   border-color: var(--border-mid);
-  box-shadow: var(--shadow-lg), var(--shadow-gold), var(--shadow-inset);
+  /* Removed gold halo — keeps offer cards clean instead of glowing. */
+  box-shadow: var(--shadow-lg), var(--shadow-inset);
 }
 .card:hover::before {
   opacity: 1;
@@ -2584,6 +2605,7 @@ main { display: block; }
 
   /* Strip backdrop-filter blurs on mobile. We keep the dark glass color
      so contrast is preserved, but drop the GPU-killing blur. */
+  .hero-title,
   .hero-subtitle,
   .modal,
   .modal-overlay,

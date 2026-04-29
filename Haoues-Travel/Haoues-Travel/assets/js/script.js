@@ -1034,11 +1034,64 @@ const STATUS_MAP = {
 function getStatusInfo(rawStatus) {
   return STATUS_MAP[rawStatus] || STATUS_MAP["PENDING"];
 }
+/* ─── Booking price resolver ─────────────────────────────────────────
+   Bookings don't carry a price field — the price is derived from the
+   matching package (and, when available, the per-room price from the
+   package's `rooms` JSON or the discrete priceDouble/Triple/... fields).
+   Returns { perPerson, total, currency } where perPerson is the
+   per-person price for the chosen room and total = perPerson * pax.
+   Returns null when no matching package / no usable price is found. */
+function getBookingPrice(b) {
+  if (!b) return null;
+  const pkgName = String(b.package || '').trim();
+  if (!pkgName) return null;
+  const pkgRaw = (state.packages || []).find(p => {
+    const item = normalizeItem(p);
+    return String(item.name || '').trim() === pkgName;
+  });
+  if (!pkgRaw) return null;
+  const pkg = normalizeItem(pkgRaw);
+  const roomType = String(b.roomType || '').trim();
+  let perPerson = Number(pkg.price) || 0;
+  const parsed = parseRoomsField(pkg.rooms);
+  const roomMatch = parsed.find(r =>
+    r.name === roomType || (roomType && r.name && roomType.includes(r.name))
+  );
+  if (roomMatch && roomMatch.price) {
+    perPerson = Number(roomMatch.price) || perPerson;
+  } else if (roomType.includes('ثنائية') && pkg.priceDouble) perPerson = Number(pkg.priceDouble);
+  else if (roomType.includes('ثلاثية') && pkg.priceTriple) perPerson = Number(pkg.priceTriple);
+  else if (roomType.includes('رباعية') && pkg.priceQuad) perPerson = Number(pkg.priceQuad);
+  else if (roomType.includes('خماسية') && pkg.priceQuint) perPerson = Number(pkg.priceQuint);
+  if (!Number.isFinite(perPerson) || perPerson <= 0) return null;
+  const pax = Math.max(1, parseInt(b.pax, 10) || 1);
+  return { perPerson, total: perPerson * pax, pax, currency: 'دج' };
+}
+/* Format a booking's price for display (table cell / export rows).
+   Shows per-person price prominently and the multiplied total below
+   when pax > 1. Falls back to a muted dash when price can't be
+   resolved (e.g. the package was deleted). */
+function formatBookingPriceCell(b) {
+  const p = getBookingPrice(b);
+  if (!p) return '<span style="color:var(--text-muted-strong); opacity:.55;">—</span>';
+  const main = `${p.perPerson.toLocaleString()} <span style="font-size:.72em; opacity:.7;">دج / شخص</span>`;
+  if (p.pax > 1) {
+    return `<div style="line-height:1.25;"><div style="font-weight:700; color:var(--gold-300);">${main}</div><div style="font-size:.72rem; color:var(--text-muted-strong); margin-top:2px;">المجموع: <strong style="color:var(--text-primary);">${p.total.toLocaleString()} دج</strong></div></div>`;
+  }
+  return `<div style="font-weight:700; color:var(--gold-300);">${main}</div>`;
+}
+/* Plain-text price for exports (Excel / PDF / Word). */
+function formatBookingPricePlain(b) {
+  const p = getBookingPrice(b);
+  if (!p) return '—';
+  if (p.pax > 1) return `${p.perPerson.toLocaleString()} دج / شخص (المجموع: ${p.total.toLocaleString()} دج)`;
+  return `${p.perPerson.toLocaleString()} دج / شخص`;
+}
 /* ─── Bookings Table ─── */
 function renderAdminBookings() {
   const list = document.getElementById('list-bookings');
   if (!state.bookings || state.bookings.length === 0) {
-    list.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:40px; color:var(--text-muted);">لا توجد حجوزات بعد</td></tr>';
+    list.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:40px; color:var(--text-muted);">لا توجد حجوزات بعد</td></tr>';
     return;
   }
   list.innerHTML = state.bookings.map(b => {
@@ -1046,6 +1099,7 @@ function renderAdminBookings() {
     const statusForFilter = getArabicStatus(b.status);
     const pkgName = String(b.package || '').trim();
     const rowIdx = Number(b.rowIndex);
+    const priceHtml = formatBookingPriceCell(b);
     return `
       <tr data-status="${escapeHtml(statusForFilter)}" data-package="${escapeHtml(pkgName)}">
         <td data-label="الاسم">${escapeHtml(b.firstName || '')} ${escapeHtml(b.lastName || '')}</td>
@@ -1053,6 +1107,7 @@ function renderAdminBookings() {
         <td data-label="الباقة">${escapeHtml(pkgName)}</td>
         <td data-label="أفراد">${escapeHtml(String(b.pax || ''))}</td>
         <td data-label="الغرفة">${escapeHtml(b.roomType || '')}</td>
+        <td data-label="السعر" style="white-space:nowrap;">${priceHtml}</td>
         <td data-label="الحالة">
           <span class="st ${si.cls}" role="button" tabindex="0" onclick="cycleBookingStatus(${rowIdx}, '${escapeJsString(b.status)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();cycleBookingStatus(${rowIdx}, '${escapeJsString(b.status)}');}" title="انقر لتغيير الحالة">
             ${si.label}
@@ -1482,15 +1537,20 @@ window.exportData = (format) => {
     return;
   }
   // FIX: Use normalized English keys for export mapping
-  const data = filtered.map(b => ({
-    "الاسم": `${b.firstName || ''} ${b.lastName || ''}`,
-    "الهاتف": b.phone || '',
-    "الباقة": b.package || '',
-    "الأشخاص": b.pax || '',
-    "الغرفة": b.roomType || '',
-    "الحالة": getArabicStatus(b.status),
-    "التاريخ": b.timestamp || ''
-  }));
+  const data = filtered.map(b => {
+    const p = getBookingPrice(b);
+    return {
+      "الاسم": `${b.firstName || ''} ${b.lastName || ''}`,
+      "الهاتف": b.phone || '',
+      "الباقة": b.package || '',
+      "الأشخاص": b.pax || '',
+      "الغرفة": b.roomType || '',
+      "السعر / شخص (دج)": p ? p.perPerson : '',
+      "المجموع (دج)": p ? p.total : '',
+      "الحالة": getArabicStatus(b.status),
+      "التاريخ": b.timestamp || ''
+    };
+  });
   if (format === 'xlsx') exportExcel(data);
   else if (format === 'pdf') exportPDF(data);
   else if (format === 'docx') exportWord(data);
@@ -1561,6 +1621,7 @@ function exportPDF(data) {
     showToast('⚠️ يرجى السماح بالنوافذ المنبثقة.', 'error');
     return;
   }
+  const fmtNum = v => (v === '' || v === null || v === undefined) ? '-' : Number(v).toLocaleString();
   const rowsHtml = data.map(row => `
     <tr>
       <td style="text-align:right;">${escapeHtml(row['الاسم'])}</td>
@@ -1568,6 +1629,8 @@ function exportPDF(data) {
       <td style="text-align:right;">${escapeHtml(row['الباقة'])}</td>
       <td style="text-align:center; font-weight:bold; font-size: 15px; color:#309aaf;">${escapeHtml(String(row['الأشخاص']))}</td>
       <td style="text-align:center;">${escapeHtml(row['الغرفة'])}</td>
+      <td style="text-align:center; font-weight:700; color:#ae9073;">${escapeHtml(fmtNum(row['السعر / شخص (دج)']))}</td>
+      <td style="text-align:center; font-weight:700;">${escapeHtml(fmtNum(row['المجموع (دج)']))}</td>
       <td style="text-align:center;">${escapeHtml(row['الحالة'])}</td>
       <td style="text-align:center; font-size:12px;">${row['التاريخ'] ? escapeHtml(new Date(row['التاريخ']).toLocaleString('ar-DZ')) : '-'}</td>
     </tr>`).join('');
@@ -1601,7 +1664,7 @@ function exportPDF(data) {
   <table>
     <thead>
       <tr>
-        <th>الاسم الكامل</th><th>الهاتف</th><th>الباقة</th><th>الأشخاص</th><th>الغرفة</th><th>الحالة</th><th>تاريخ التسجيل</th>
+        <th>الاسم الكامل</th><th>الهاتف</th><th>الباقة</th><th>الأشخاص</th><th>الغرفة</th><th>السعر / شخص (دج)</th><th>المجموع (دج)</th><th>الحالة</th><th>تاريخ التسجيل</th>
       </tr>
     </thead>
     <tbody>${rowsHtml}</tbody>
@@ -1617,6 +1680,7 @@ function exportPDF(data) {
 
 function exportWord(data) {
   const filterLabel = buildReportFilterLabel(' • ');
+  const fmtNum = v => (v === '' || v === null || v === undefined) ? '-' : Number(v).toLocaleString();
   const rowsHtml = data.map(row => `
     <tr>
       <td>${escapeHtml(row['الاسم'])}</td>
@@ -1624,6 +1688,8 @@ function exportWord(data) {
       <td>${escapeHtml(row['الباقة'])}</td>
       <td>${escapeHtml(String(row['الأشخاص']))}</td>
       <td>${escapeHtml(row['الغرفة'])}</td>
+      <td>${escapeHtml(fmtNum(row['السعر / شخص (دج)']))}</td>
+      <td>${escapeHtml(fmtNum(row['المجموع (دج)']))}</td>
       <td>${escapeHtml(row['الحالة'])}</td>
       <td>${row['التاريخ'] ? escapeHtml(new Date(row['التاريخ']).toLocaleString('ar-DZ')) : '-'}</td>
     </tr>`).join('');
@@ -1645,7 +1711,7 @@ function exportWord(data) {
   <p class="info">الفلتر: ${escapeHtml(filterLabel)} | إجمالي النتائج: ${data.length} حجز | تاريخ التصدير: ${escapeHtml(new Date().toLocaleDateString('ar-DZ'))}</p>
   <table>
     <thead>
-      <tr><th>الاسم</th><th>الهاتف</th><th>الباقة</th><th>الأشخاص</th><th>الغرفة</th><th>الحالة</th><th>التاريخ</th></tr>
+      <tr><th>الاسم</th><th>الهاتف</th><th>الباقة</th><th>الأشخاص</th><th>الغرفة</th><th>السعر / شخص (دج)</th><th>المجموع (دج)</th><th>الحالة</th><th>التاريخ</th></tr>
     </thead>
     <tbody>${rowsHtml}</tbody>
   </table>

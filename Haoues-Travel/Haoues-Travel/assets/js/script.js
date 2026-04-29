@@ -1045,10 +1045,13 @@ function getBookingPrice(b) {
   if (!b) return null;
   const pkgName = String(b.package || '').trim();
   if (!pkgName) return null;
-  const pkgRaw = (state.packages || []).find(p => {
-    const item = normalizeItem(p);
-    return String(item.name || '').trim() === pkgName;
-  });
+  // Search admin packages first (the full list, includes unpublished
+  // packages) so admin contexts can resolve prices for bookings made
+  // against unpublished offers; fall back to public packages.
+  const matchByName = p => String(normalizeItem(p).name || '').trim() === pkgName;
+  const pkgRaw =
+    (state.adminPackages || []).find(matchByName) ||
+    (state.packages || []).find(matchByName);
   if (!pkgRaw) return null;
   const pkg = normalizeItem(pkgRaw);
   const roomType = String(b.roomType || '').trim();
